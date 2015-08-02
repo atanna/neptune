@@ -64,7 +64,7 @@ def rmdir(d):
         
 def vprint(mode, t):
     ''' Print to stdout, only if in verbose mode'''
-    if(mode):
+    if mode:
             print(t) 
         
 # ================ Output prediction results and prepare code submission =================
