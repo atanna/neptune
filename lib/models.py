@@ -1,128 +1,14 @@
-from sklearn import ensemble, cross_validation
 import numpy as np
 import scipy as sp
-from sklearn.cross_validation import cross_val_score
-from sklearn.grid_search import GridSearchCV
 from sklearn.linear_model import Ridge, RidgeClassifier, LogisticRegression
-from sklearn.metrics import classification_report
 from sklearn.naive_bayes import BernoulliNB
-from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor, BaggingClassifier, BaggingRegressor, RandomForestClassifier, \
-    ExtraTreesClassifier
-from sklearn.ensemble import RandomForestClassifier as RForestClass
-from sklearn.ensemble import RandomForestRegressor as RForestRegress
-from sklearn.ensemble import BaggingClassifier, BaggingRegressor
-from sklearn.naive_bayes import BernoulliNB
+from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor, BaggingClassifier, BaggingRegressor, RandomForestClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import SelectKBest, SelectPercentile, f_classif, \
-    f_regression, VarianceThreshold
+from sklearn.feature_selection import SelectKBest
 from sklearn.feature_selection import chi2
 import operator
 import copy
-from sklearn.preprocessing import Imputer, Normalizer
 
-
-class OurAutoML:
-    """
-    Code from run.py in sample
-    """
-    def __init__(self, info):
-        self.target_num = info['target_num']
-        self.task = info['task']
-        self.metric = info['metric']
-        self.sparse = info['is_sparse']
-        self.task = info['task']
-        self.selector = None
-
-    def fit(self, X_train, Y_train, n_estimators=100):
-        if self.task == 'binary.classification' or self.task == 'multiclass.classification':
-            self._binary_classifier(X_train, Y_train, n_estimators=n_estimators)
-
-        elif self.task == 'multilabel.classification':
-            if self.sparse:
-                self.Ms = [BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10, n_jobs=8).fit(X_train, Y_train[:, i]) for i in range(self.target_num)]
-            else:
-                self.Ms = [RForestClass(n_estimators, random_state=1, n_jobs=8).fit(X_train, Y_train[:, i]) for i in range(self.target_num)]
-        elif self.task == 'regression':
-            if self.sparse:
-                self.M = BaggingRegressor(base_estimator=BernoulliNB(), n_estimators=n_estimators/10, n_jobs=8).fit(X_train, Y_train)
-            else:
-                self.M = RForestRegress(n_estimators, random_state=n_estimators, n_jobs=8).fit(X_train, Y_train)
-        else:
-            assert "task not recognised"
-        return self
-
-    def _binary_classifier(self, X, Y, n_estimators=100):
-        """
-        Main fit function
-        """
-        if self.sparse:
-                clf = BaggingClassifier(base_estimator=BernoulliNB(),
-                                        n_estimators=n_estimators/10, n_jobs=8)
-        else:
-            clf = RForestClass(n_estimators, n_jobs=8)
-            # clf = BaggingClassifier(rf, n_estimators=5, n_jobs=8)
-            # clf = ExtraTreesClassifier(max_depth=3, n_estimators=n_estimators, random_state=0)
-
-        selector = VarianceThreshold()
-
-        self.M = Pipeline([
-            ('feature_selector', selector),
-            ('clf', clf),
-        ])
-        self.M.fit(X, Y)
-
-    def fit_and_count_av_score(self, X, Y, cv=3, n_estimators=100, test_size=0.4):
-        X_train, X_test, y_train, y_test = cross_validation.train_test_split(X, Y, test_size=test_size, random_state=0)
-        if self.sparse:
-            clf = BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10, n_jobs=8)
-        else:
-            clf = RForestClass(n_estimators, n_jobs=8)
-
-        selector = VarianceThreshold()
-
-        self.M = Pipeline([
-            ('feature_selector', selector),
-            ('clf', clf),
-        ])
-        self.M.fit(X_train, y_train)
-        scores = cross_val_score(self.M, X_test, y_test, cv=cv, n_jobs=8,
-                                 scoring='accuracy')
-        print("test_score: ", scores.mean())
-        self.clf_report = classification_report(y_test, self.M.predict(X_test))
-        print(self.clf_report)
-
-    def predict(self, X):
-        if self.task == 'binary.classification':
-            Y_pred = self.M.predict_proba(X)[:, 1]
-        elif self.task == 'multiclass.classification':
-            Y_pred = np.array([self.M.predict_proba(X)[:, i] for i in range(self.target_num)]).T
-
-        elif self.task == 'multilabel.classification':
-            Y_pred = np.array([self.Ms[i].predict_proba(X)[:, 1] for i in range(self.target_num)]).T
-        elif self.task == 'regression':
-            Y_pred = self.M.predict(X)
-
-        if self.sparse:
-            if self.task == 'multilabel.classification' \
-                    or self.task == 'multiclass.classification':
-                eps = 0.001
-                for i in range(len(Y_pred)):
-                    pos = np.argmax(Y_pred[i])
-                    Y_pred[i] += eps
-                    Y_pred[i][pos] -= self.target_num * eps
-        return Y_pred
-
-    def scores(self, Y_true, Y_pred):
-        pass
-
-
-
-
-
-
-
-
-#it's not use now. Just sample
 class MyAutoML:
     ''' Rough sketch of a class that "solves" the AutoML problem. We illustrate various type of data that will be encountered in the challenge can be handled.
          Also, we make sure that the model regularly outputs predictions on validation and test data, such that, if the execution of the program is interrupted (timeout)
@@ -213,7 +99,6 @@ class MyAutoML:
             for k in range(prediction.shape[0]):
                 prediction[k,:] /= sp.maximum(norma[k], eps)  
         return prediction
-
 
 class MultiLabelEnsemble:
     ''' MultiLabelEnsemble(predictorInstance, balance=False)
