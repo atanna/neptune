@@ -100,7 +100,11 @@
 # Verbose mode: 
 ##############
 # Recommended to keep verbose = True: shows various progression messages
+from sklearn.metrics import classification_report
+from lib.models import OurAutoML
+
 verbose = True # outputs messages to stdout and stderr for debug purposes
+verbose = False
 
 # Debug level:
 ############## 
@@ -140,8 +144,12 @@ submission_filename = '../automl_sample_submission_' + the_date
 # Use default location for the input and output data:
 # If no arguments to run.py are provided, this is where the data will be found
 # and the results written to. Change the root_dir to your local directory.
-default_input_dir = "/home/ubuntu/Data"
-default_output_dir = "res"
+default_input_dir = "/home/ann/ML/datadir/"
+default_output_dir = "res_/"
+# default_output_dir = "res_score_45/"
+
+# _MODE = "TEST_SCORE"
+_MODE = "FIT"
 
 # =========================== END USER OPTIONS ================================
 
@@ -158,10 +166,7 @@ from sys import argv, path
 import numpy as np
 import time
 overall_start = time.time()
-from sklearn.ensemble import RandomForestClassifier as RForestClass
-from sklearn.ensemble import RandomForestRegressor as RForestRegress
-from sklearn.ensemble import BaggingClassifier, BaggingRegressor
-from sklearn.naive_bayes import BernoulliNB
+
 
 # Our directories
 # Note: On codalab, there is an extra sub-directory called "program"
@@ -178,9 +183,9 @@ res_dir = os.path.join(run_dir, "res")
 # Our libraries  
 path.append (run_dir)
 path.append (lib_dir)
-import data_io                       # general purpose input/output functions
-from data_io import vprint           # print only in verbose mode
-from data_manager import DataManager # load/save data and get info about them
+import lib.data_io as data_io                       # general purpose input/output functions
+from lib.data_io import vprint           # print only in verbose mode
+from lib.data_manager import DataManager # load/save data and get info about them
 
 if debug_mode >= 4 or running_on_codalab: # Show library version and directory structure
     data_io.show_version()
@@ -188,7 +193,7 @@ if debug_mode >= 4 or running_on_codalab: # Show library version and directory s
 
 # =========================== BEGIN PROGRAM ================================
 
-if __name__=="__main__" and debug_mode<4:	
+if __name__=="__main__" and debug_mode<4:
     #### Check whether everything went well (no time exceeded)
     execution_success = True
     
@@ -232,6 +237,7 @@ if __name__=="__main__" and debug_mode<4:
 
     # ================ @CODE SUBMISSION (SUBTITUTE YOUR CODE) ================= 
     overall_time_budget = 0
+    print("output_dir", output_dir)
     for basename in datanames: # Loop over datasets
         
         vprint( verbose,  "************************************************")
@@ -245,7 +251,7 @@ if __name__=="__main__" and debug_mode<4:
         # ======== Creating a data object with data, informations about it
         vprint( verbose,  "======== Reading and converting data ==========")
         D = DataManager(basename, input_dir, replace_missing=True, filter_features=True, verbose=verbose)
-        print D
+        vprint(verbose, D)
         
         # ======== Keeping track of time
         if debug_mode<1:
@@ -272,7 +278,7 @@ if __name__=="__main__" and debug_mode<4:
         
         # ========= Iterating over learning cycles and keeping track of time
         time_spent = time.time() - start
-        vprint( verbose,  "[+] Remaining time after building model %5.2f sec" % (time_budget-time_spent))        
+        vprint( verbose,  "[+] Remaining time after building model %5.2f sec" % (time_budget-time_spent))
         if time_spent >= time_budget:
             vprint( verbose,  "[-] Sorry, time budget exceeded, skipping this task")
             execution_success = False
@@ -282,99 +288,48 @@ if __name__=="__main__" and debug_mode<4:
         start = time.time()              # Reset the counter
         time_spent = 0                   # Initialize time spent learning
         time_spent_last = 0                   # Initialize time spent learning
+        time_stock = 10
+        prev_n_estimators = 0
         cycle = 0
-        
-        while  cycle <= 1: #max_cycle:
+        print("{:~^{n}}".format(basename.capitalize(), n=50))
+        while cycle <= 4: # max_cycle:
             begin = time.time()
-            vprint( verbose,  "=========== " + basename.capitalize() +" Training cycle " + str(cycle) +" ================") 
+            vprint( verbose,  "=========== " + basename.capitalize() +" Training cycle " + str(cycle) +" ================")
             n_estimators = 10
-            if cycle==1:
-                n_estimators = int((np.floor(time_budget / time_spent_last) - 1 ) * 5) # * 5 == aim to use 5/10 of the time budget
-                if n_estimators <= 0:
+            if cycle:
+                n_estimators = int((time_budget / time_spent_last - 1) * prev_n_estimators - time_stock)
+                # n_estimators = int(((time_budget / time_spent_last) - 1) * 5) # * 5 == aim to use 5/10 of the time budget
+                if n_estimators <= 0 or prev_n_estimators > n_estimators:
                     break
-            vprint( verbose,  "[+] Number of estimators: %d" % (n_estimators))   
-            
-            K = D.info['target_num']
-            sparse = False
-            if D.info['is_sparse'] == 1:
-                sparse = True
-                
-            if cycle == 1 and not sparse:
-                fi = M.feature_importances_
-                print M.feature_importances_
-                print D.info['feat_num']
-                fis = sorted(fi)
-                th = fis[- D.info['feat_num'] / 10]
-                print th
-                which = fi > th
-                print which
-                D.data['X_train'] = D.data['X_train'][:, which]
-                D.data['X_test']= D.data['X_test'][:, which]
-                D.data['X_valid']= D.data['X_valid'][:, which]
-                print D.data['X_train'].shape
-                print "selected"
-           
-                
-            task = D.info['task']
+            print("{} estimators".format(n_estimators))
+            prev_n_estimators = n_estimators
 
-            if task == 'binary.classification' or task == 'multiclass.classification':
-                if sparse:
-                    M = BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10).fit(D.data['X_train'], D.data['Y_train'])
-                else:
-                    M = RForestClass(n_estimators, random_state=1).fit(D.data['X_train'], D.data['Y_train'])
-            elif task == 'multilabel.classification':
-                if sparse:
-                    Ms = [BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10).fit(D.data['X_train'], D.data['Y_train'][:, i]) for i in range(K)]
-                else:
-                    Ms = [RForestClass(n_estimators, random_state=1).fit(D.data['X_train'], D.data['Y_train'][:, i]) for i in range(K)]
-            elif task == 'regression':  
-                if sparse:
-                    M = BaggingRegressor(base_estimator=BernoulliNB(), n_estimators=n_estimators/10).fit(D.data['X_train'], D.data['Y_train'])
-                else:            
-                    M = RForestRegress(n_estimators, random_state=n_estimators).fit(D.data['X_train'], D.data['Y_train'])
+            K = D.info['target_num']
+            task = D.info['task']
+            X_train, Y_train = D.data['X_train'], D.data['Y_train']
+            autoML = OurAutoML(D.info)
+
+            if _MODE == "TEST_SCORE":
+                autoML.fit_and_count_av_score(X_train, Y_train, n_estimators=n_estimators, test_size=0.4)
             else:
-                vprint( verbose,  "[-] task not recognised")
-                break         
+                autoML.fit(X_train, Y_train, n_estimators=n_estimators)
+
+
+
             vprint( verbose,  "[+] Fitting success, time spent so far %5.2f sec" % (time.time() - start))
-            
-            
+
             # Make predictions
-            if task == 'binary.classification':
-                Y_valid = M.predict_proba(D.data['X_valid'])[:, 1]
-                Y_test =  M.predict_proba(D.data['X_test'])[:, 1]
-                print Y_valid, Y_test
-            elif task == 'multiclass.classification':
-                Y_valid = np.array([M.predict_proba(D.data['X_valid'])[:, i] for i in range(K)]).T 
-                Y_test =  np.array([M.predict_proba(D.data['X_test'])[:, i] for i in range(K)]).T 
-                
-                
-            elif task == 'multilabel.classification':
-                Y_valid = np.array([Ms[i].predict_proba(D.data['X_valid'])[:, 1] for i in range(K)]).T
-                Y_test =  np.array([Ms[i].predict_proba(D.data['X_valid'])[:, 1] for i in range(K)]).T
-            elif task == 'regression':    
-                Y_valid = M.predict(D.data['X_valid'])
-                Y_test = M.predict(D.data['X_test'])
-            
-            if sparse:
-                if task == 'multilabel.classification' or task == 'multiclass.classification':
-                    eps = 0.001
-                    for i in range(len(Y_valid)):
-                        pos = np.argmax(Y_valid[i])
-                        Y_valid[i] += eps
-                        Y_valid[i][pos] -= K * eps
-                    for i in range(len(Y_test)):
-                        pos = np.argmax(Y_test[i])
-                        Y_test[i] += eps
-                        Y_test[i][pos] -= K * eps
-                    
-            
+            Y_valid = autoML.predict(D.data['X_valid'])
+            Y_test = autoML.predict(D.data['X_test'])
+
+            print("({} s)".format( "%5.2f"%(time.time() - start)))
             vprint( verbose,  "[+] Prediction success, time spent so far %5.2f sec" % (time.time() - start))
             # Write results
             filename_valid = basename + '_valid_' + str(cycle).zfill(3) + '.predict'
             data_io.write(os.path.join(output_dir,filename_valid), Y_valid)
             filename_test = basename + '_test_' + str(cycle).zfill(3) + '.predict'
             data_io.write(os.path.join(output_dir,filename_test), Y_test)
-            vprint( verbose,  "[+] Results saved, time spent so far %5.2f sec" % (time.time() - start))         
+            vprint( verbose,  "[+] Results saved, time spent so far %5.2f sec" % (time.time() - start))
             time_spent = time.time() - start 
             vprint( verbose,  "[+] End cycle, remaining time %5.2f sec" % (time_budget-time_spent))
             cycle += 1
@@ -384,8 +339,9 @@ if __name__=="__main__" and debug_mode<4:
     if zipme and not(running_on_codalab):
         vprint( verbose,  "========= Zipping this directory to prepare for submit ==============")
         data_io.zipdir(submission_filename + '.zip', ".")
-    	
+
     overall_time_spent = time.time() - overall_start
+    print("\nOverall time: {} s".format(overall_time_spent + overall_time_budget))
     if execution_success:
         vprint( verbose,  "[+] Done")
         vprint( verbose,  "[+] Overall time spent %5.2f sec " % overall_time_spent + "::  Overall time budget %5.2f sec" % overall_time_budget)
@@ -398,5 +354,6 @@ if __name__=="__main__" and debug_mode<4:
             exit(0)
         else:
             exit(1)
+
 
 
