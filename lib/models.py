@@ -52,7 +52,7 @@ class OurAutoML:
             assert "task not recognised"
         return self
 
-    def _binary_classifier(self, X, Y, n_estimators=100):
+    def _binary_classifier(self, X, Y, n_estimators=100, min_features=45):
         """
         Main fit function
         """
@@ -61,17 +61,15 @@ class OurAutoML:
                                         n_estimators=n_estimators/10, n_jobs=8)
         else:
             clf = RForestClass(n_estimators, n_jobs=8)
-            # clf = BaggingClassifier(rf, n_estimators=5, n_jobs=8)
-            # clf = ExtraTreesClassifier(max_depth=3, n_estimators=n_estimators, random_state=0)
 
-        selector = VarianceThreshold()
-        self.M = Pipeline([
-            ('feature_selector', selector),
-            ('feature_selection', LinearSVC()),
-            ('clf', clf),
-        ])
+        n_features = X.shape[1]
+        seq_to_pipeline = [('discard_const_features', VarianceThreshold())]
+        if n_features > min_features:
+            seq_to_pipeline.append(('feature_selection', LinearSVC()))
+        seq_to_pipeline.append(('clf', clf))
+        self.M = Pipeline(seq_to_pipeline)
         self.M.fit(X, Y)
-        print("n_params: {}".format(len(self.M.transform(X[0:1]))))
+        print("n_params: {}  ({})".format(self.M.transform(X[0:1]).shape[1], X.shape[1]))
 
     def fit_and_count_av_score(self, X, Y, cv=3, n_estimators=100, test_size=0.4):
         X_train, X_test, y_train, y_test = cross_validation.train_test_split(X, Y, test_size=test_size, random_state=0)

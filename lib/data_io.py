@@ -55,7 +55,8 @@ def mkdir(d):
 def mvdir(source, dest):
     ''' Move a directory'''
     if os.path.exists(source):
-        os.rename(source, dest)
+        rmdir(source)
+        mkdir(source)
 
 def rmdir(d):
     ''' Remove an existingdirectory'''
@@ -252,3 +253,4 @@ def show_version():
 	# Give information on the version installed
 	swrite("Versions of libraries installed:\n")
 	map(swrite, sorted(["%s==%s\n" % (i.key, i.version) for i in lib()]))
+
