@@ -29,7 +29,7 @@ class OurAutoML:
 
     def fit(self, X_train, Y_train, n_estimators=100, cv=5,):
         if self.task == 'binary.classification' or self.task == 'multiclass.classification':
-            self._binary_classifier(X_train, Y_train, n_estimators)
+            self._binary_classifier(X_train, Y_train, cv=cv, n_estimators=n_estimators)
 
         elif self.task == 'multilabel.classification':
             if self.sparse:
@@ -45,14 +45,14 @@ class OurAutoML:
             assert "task not recognised"
         return self
 
-    def _binary_classifier(self, X_train, Y_train, n_estimators=100):
+    def _binary_classifier(self, X_train, Y_train, cv=3, n_estimators=100):
         """
         Main fit function
         """
         if self.sparse:
                 self.M = BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10).fit(X_train, Y_train)
         else:
-            self.M = RForestClass(n_estimators, random_state=1).fit(X_train, Y_train)
+            self.M = RForestClass(n_estimators, random_state=42).fit(X_train, Y_train)
 
         imputer = Imputer(strategy='median', missing_values=np.NaN)
 

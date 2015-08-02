@@ -103,6 +103,7 @@
 from lib.models import OurAutoML
 
 verbose = True # outputs messages to stdout and stderr for debug purposes
+verbose = False
 
 # Debug level:
 ############## 
@@ -142,8 +143,8 @@ submission_filename = '../automl_sample_submission_' + the_date
 # Use default location for the input and output data:
 # If no arguments to run.py are provided, this is where the data will be found
 # and the results written to. Change the root_dir to your local directory.
-default_input_dir = "/home/ann/ML/datadir"
-default_output_dir = "res"
+default_input_dir = "/home/ann/ML/datadir/"
+default_output_dir = "res/"
 
 # =========================== END USER OPTIONS ================================
 
@@ -244,7 +245,7 @@ if __name__=="__main__" and debug_mode<4:
         # ======== Creating a data object with data, informations about it
         vprint( verbose,  "======== Reading and converting data ==========")
         D = DataManager(basename, input_dir, replace_missing=True, filter_features=True, verbose=verbose)
-        print D
+        vprint(verbose, D)
         
         # ======== Keeping track of time
         if debug_mode<1:
@@ -271,7 +272,7 @@ if __name__=="__main__" and debug_mode<4:
         
         # ========= Iterating over learning cycles and keeping track of time
         time_spent = time.time() - start
-        vprint( verbose,  "[+] Remaining time after building model %5.2f sec" % (time_budget-time_spent))        
+        vprint( verbose,  "[+] Remaining time after building model %5.2f sec" % (time_budget-time_spent))
         if time_spent >= time_budget:
             vprint( verbose,  "[-] Sorry, time budget exceeded, skipping this task")
             execution_success = False
@@ -281,37 +282,37 @@ if __name__=="__main__" and debug_mode<4:
         start = time.time()              # Reset the counter
         time_spent = 0                   # Initialize time spent learning
         time_spent_last = 0                   # Initialize time spent learning
+        time_stock = 10
         cycle = 0
-        
-        while  cycle <= 1: #max_cycle:
+        print("{:~^{n}}".format(basename.capitalize(), n=50))
+        while cycle <= 1: # max_cycle:
             begin = time.time()
-            vprint( verbose,  "=========== " + basename.capitalize() +" Training cycle " + str(cycle) +" ================") 
+            vprint( verbose,  "=========== " + basename.capitalize() +" Training cycle " + str(cycle) +" ================")
             n_estimators = 10
-            if cycle==1:
-                n_estimators = int((np.floor(time_budget / time_spent_last) - 1 ) * 5) # * 5 == aim to use 5/10 of the time budget
+            if cycle:
+                n_estimators = int((time_budget / time_spent_last - 1) * n_estimators - time_stock)
+                # n_estimators = int(((time_budget / time_spent_last) - 1) * 5) # * 5 == aim to use 5/10 of the time budget
                 if n_estimators <= 0:
                     break
-            vprint( verbose,  "[+] Number of estimators: %d" % (n_estimators))   
-            
+            print("{} estimators".format(n_estimators))
             K = D.info['target_num']
             task = D.info['task']
-            autoML = OurAutoML(D.info).fit(D.data['X_train'], D.data['Y_train'])
+            autoML = OurAutoML(D.info).fit(D.data['X_train'], D.data['Y_train'], cv=2, n_estimators=n_estimators)
 
-            vprint(verbose, "__________ Average scores: %5.5f" % (autoML.scores.mean()))
             vprint( verbose,  "[+] Fitting success, time spent so far %5.2f sec" % (time.time() - start))
 
             # Make predictions
             Y_valid = autoML.predict(D.data['X_valid'])
             Y_test = autoML.predict(D.data['X_test'])
-                    
-            
+
+            print("score: {}   ({} s)".format(autoML.scores.mean(), "%5.2f"%(time.time() - start)))
             vprint( verbose,  "[+] Prediction success, time spent so far %5.2f sec" % (time.time() - start))
             # Write results
             filename_valid = basename + '_valid_' + str(cycle).zfill(3) + '.predict'
             data_io.write(os.path.join(output_dir,filename_valid), Y_valid)
             filename_test = basename + '_test_' + str(cycle).zfill(3) + '.predict'
             data_io.write(os.path.join(output_dir,filename_test), Y_test)
-            vprint( verbose,  "[+] Results saved, time spent so far %5.2f sec" % (time.time() - start))         
+            vprint( verbose,  "[+] Results saved, time spent so far %5.2f sec" % (time.time() - start))
             time_spent = time.time() - start 
             vprint( verbose,  "[+] End cycle, remaining time %5.2f sec" % (time_budget-time_spent))
             cycle += 1
@@ -321,8 +322,9 @@ if __name__=="__main__" and debug_mode<4:
     if zipme and not(running_on_codalab):
         vprint( verbose,  "========= Zipping this directory to prepare for submit ==============")
         data_io.zipdir(submission_filename + '.zip', ".")
-    	
+
     overall_time_spent = time.time() - overall_start
+    print("time: {} s".format(overall_time_spent + overall_time_budget))
     if execution_success:
         vprint( verbose,  "[+] Done")
         vprint( verbose,  "[+] Overall time spent %5.2f sec " % overall_time_spent + "::  Overall time budget %5.2f sec" % overall_time_budget)
