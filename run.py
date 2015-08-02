@@ -148,8 +148,8 @@ default_input_dir = "/home/ann/ML/datadir/"
 default_output_dir = "res_/"
 # default_output_dir = "res_score_45/"
 
-# _MODE = "TEST_SCORE"
-_MODE = "FIT"
+_MODE = "TEST_SCORE"
+# _MODE = "FIT"
 
 # =========================== END USER OPTIONS ================================
 
@@ -354,5 +354,6 @@ if __name__=="__main__" and debug_mode<4:
             exit(0)
         else:
             exit(1)
+
 
 

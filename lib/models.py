@@ -19,6 +19,7 @@ from sklearn.feature_selection import chi2
 import operator
 import copy
 from sklearn.preprocessing import Imputer, Normalizer
+from sklearn.svm import LinearSVC
 
 
 class OurAutoML:
@@ -64,27 +65,17 @@ class OurAutoML:
             # clf = ExtraTreesClassifier(max_depth=3, n_estimators=n_estimators, random_state=0)
 
         selector = VarianceThreshold()
-
         self.M = Pipeline([
             ('feature_selector', selector),
+            ('feature_selection', LinearSVC()),
             ('clf', clf),
         ])
         self.M.fit(X, Y)
+        print("n_params: {}".format(len(self.M.transform(X[0:1]))))
 
     def fit_and_count_av_score(self, X, Y, cv=3, n_estimators=100, test_size=0.4):
         X_train, X_test, y_train, y_test = cross_validation.train_test_split(X, Y, test_size=test_size, random_state=0)
-        if self.sparse:
-            clf = BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10, n_jobs=8)
-        else:
-            clf = RForestClass(n_estimators, n_jobs=8)
-
-        selector = VarianceThreshold()
-
-        self.M = Pipeline([
-            ('feature_selector', selector),
-            ('clf', clf),
-        ])
-        self.M.fit(X_train, y_train)
+        self.fit(X_train, y_train, n_estimators)
         scores = cross_val_score(self.M, X_test, y_test, cv=cv, n_jobs=8,
                                  scoring='accuracy')
         print("test_score: ", scores.mean())
@@ -314,3 +305,4 @@ class RandomPredictor:
     def predict_proba(self, X):
         prediction = np.random.rand(X.shape[0],self.target_num)
         return prediction			
+
