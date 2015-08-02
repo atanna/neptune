@@ -100,6 +100,8 @@
 # Verbose mode: 
 ##############
 # Recommended to keep verbose = True: shows various progression messages
+from lib.models import OurAutoML
+
 verbose = True # outputs messages to stdout and stderr for debug purposes
 
 # Debug level:
@@ -140,7 +142,7 @@ submission_filename = '../automl_sample_submission_' + the_date
 # Use default location for the input and output data:
 # If no arguments to run.py are provided, this is where the data will be found
 # and the results written to. Change the root_dir to your local directory.
-default_input_dir = "/home/ubuntu/Data"
+default_input_dir = "/home/ann/ML/datadir"
 default_output_dir = "res"
 
 # =========================== END USER OPTIONS ================================
@@ -158,10 +160,7 @@ from sys import argv, path
 import numpy as np
 import time
 overall_start = time.time()
-from sklearn.ensemble import RandomForestClassifier as RForestClass
-from sklearn.ensemble import RandomForestRegressor as RForestRegress
-from sklearn.ensemble import BaggingClassifier, BaggingRegressor
-from sklearn.naive_bayes import BernoulliNB
+
 
 # Our directories
 # Note: On codalab, there is an extra sub-directory called "program"
@@ -188,7 +187,7 @@ if debug_mode >= 4 or running_on_codalab: # Show library version and directory s
 
 # =========================== BEGIN PROGRAM ================================
 
-if __name__=="__main__" and debug_mode<4:	
+if __name__=="__main__" and debug_mode<4:
     #### Check whether everything went well (no time exceeded)
     execution_success = True
     
@@ -295,62 +294,15 @@ if __name__=="__main__" and debug_mode<4:
             vprint( verbose,  "[+] Number of estimators: %d" % (n_estimators))   
             
             K = D.info['target_num']
-            sparse = False
-            if D.info['is_sparse'] == 1:
-                sparse = True
-           
-                
             task = D.info['task']
+            autoML = OurAutoML(D.info).fit(D.data['X_train'], D.data['Y_train'])
 
-            if task == 'binary.classification' or task == 'multiclass.classification':
-                if sparse:
-                    M = BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10).fit(D.data['X_train'], D.data['Y_train'])
-                else:
-                    M = RForestClass(n_estimators, random_state=1).fit(D.data['X_train'], D.data['Y_train'])
-            elif task == 'multilabel.classification':
-                if sparse:
-                    Ms = [BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10).fit(D.data['X_train'], D.data['Y_train'][:, i]) for i in range(K)]
-                else:
-                    Ms = [RForestClass(n_estimators, random_state=1).fit(D.data['X_train'], D.data['Y_train'][:, i]) for i in range(K)]
-            elif task == 'regression':  
-                if sparse:
-                    M = BaggingRegressor(base_estimator=BernoulliNB(), n_estimators=n_estimators/10).fit(D.data['X_train'], D.data['Y_train'])
-                else:            
-                    M = RForestRegress(n_estimators, random_state=n_estimators).fit(D.data['X_train'], D.data['Y_train'])
-            else:
-                vprint( verbose,  "[-] task not recognised")
-                break         
+            vprint(verbose, "__________ Average scores: %5.5f" % (autoML.scores.mean()))
             vprint( verbose,  "[+] Fitting success, time spent so far %5.2f sec" % (time.time() - start))
-            
-            
+
             # Make predictions
-            if task == 'binary.classification':
-                Y_valid = M.predict_proba(D.data['X_valid'])[:, 1]
-                Y_test =  M.predict_proba(D.data['X_test'])[:, 1]
-                print Y_valid, Y_test
-            elif task == 'multiclass.classification':
-                Y_valid = np.array([M.predict_proba(D.data['X_valid'])[:, i] for i in range(K)]).T 
-                Y_test =  np.array([M.predict_proba(D.data['X_test'])[:, i] for i in range(K)]).T 
-                
-                
-            elif task == 'multilabel.classification':
-                Y_valid = np.array([Ms[i].predict_proba(D.data['X_valid'])[:, 1] for i in range(K)]).T
-                Y_test =  np.array([Ms[i].predict_proba(D.data['X_valid'])[:, 1] for i in range(K)]).T
-            elif task == 'regression':    
-                Y_valid = M.predict(D.data['X_valid'])
-                Y_test = M.predict(D.data['X_test'])
-            
-            if sparse:
-                if task == 'multilabel.classification' or task == 'multiclass.classification':
-                    eps = 0.001
-                    for i in range(len(Y_valid)):
-                        pos = np.argmax(Y_valid[i])
-                        Y_valid[i] += eps
-                        Y_valid[i][pos] -= K * eps
-                    for i in range(len(Y_test)):
-                        pos = np.argmax(Y_test[i])
-                        Y_test[i] += eps
-                        Y_test[i][pos] -= K * eps
+            Y_valid = autoML.predict(D.data['X_valid'])
+            Y_test = autoML.predict(D.data['X_test'])
                     
             
             vprint( verbose,  "[+] Prediction success, time spent so far %5.2f sec" % (time.time() - start))
