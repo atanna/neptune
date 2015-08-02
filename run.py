@@ -309,10 +309,11 @@ if __name__=="__main__" and debug_mode<4:
             X_train, Y_train = D.data['X_train'], D.data['Y_train']
             autoML = OurAutoML(D.info)
 
-            if _MODE == "fit":
-                autoML.fit(X_train, Y_train, n_estimators=n_estimators)
-            else:
+            if _MODE == "TEST_SCORE":
                 autoML.fit_and_count_av_score(X_train, Y_train, n_estimators=n_estimators, test_size=0.4)
+            else:
+                autoML.fit(X_train, Y_train, n_estimators=n_estimators)
+
 
 
             vprint( verbose,  "[+] Fitting success, time spent so far %5.2f sec" % (time.time() - start))
