@@ -144,12 +144,12 @@ submission_filename = '../automl_sample_submission_' + the_date
 # Use default location for the input and output data:
 # If no arguments to run.py are provided, this is where the data will be found
 # and the results written to. Change the root_dir to your local directory.
-default_input_dir = "/home/ann/ML/datadir/"
+default_input_dir = "../ML/datadir/"
 default_output_dir = "res_/"
 # default_output_dir = "res_score_45/"
 
-_MODE = "TEST_SCORE"
-# _MODE = "FIT"
+# _MODE = "TEST_SCORE"
+_MODE = "FIT"
 
 # =========================== END USER OPTIONS ================================
 
@@ -288,16 +288,19 @@ if __name__=="__main__" and debug_mode<4:
         start = time.time()              # Reset the counter
         time_spent = 0                   # Initialize time spent learning
         time_spent_last = 0                   # Initialize time spent learning
-        time_stock = 10
+        time_stock = 5
         prev_n_estimators = 0
         cycle = 0
         print("{:~^{n}}".format(basename.capitalize(), n=50))
-        while cycle <= 4: # max_cycle:
+        autoML = OurAutoML(D.info)
+        X_train, Y_train = D.data['X_train'], D.data['Y_train']
+        autoML.preprocess_bin_cl(X_train, Y_train)
+        while cycle <= 1: # max_cycle:
             begin = time.time()
             vprint( verbose,  "=========== " + basename.capitalize() +" Training cycle " + str(cycle) +" ================")
             n_estimators = 10
             if cycle:
-                n_estimators = int((time_budget / time_spent_last - 1) * prev_n_estimators - time_stock)
+                n_estimators = int((time_budget*1.2 / time_spent_last - 0.5) * prev_n_estimators - time_stock)
                 # n_estimators = int(((time_budget / time_spent_last) - 1) * 5) # * 5 == aim to use 5/10 of the time budget
                 if n_estimators <= 0 or prev_n_estimators > n_estimators:
                     break
@@ -306,15 +309,11 @@ if __name__=="__main__" and debug_mode<4:
 
             K = D.info['target_num']
             task = D.info['task']
-            X_train, Y_train = D.data['X_train'], D.data['Y_train']
-            autoML = OurAutoML(D.info)
 
             if _MODE == "TEST_SCORE":
                 autoML.fit_and_count_av_score(X_train, Y_train, n_estimators=n_estimators, test_size=0.4)
             else:
                 autoML.fit(X_train, Y_train, n_estimators=n_estimators)
-
-
 
             vprint( verbose,  "[+] Fitting success, time spent so far %5.2f sec" % (time.time() - start))
 
@@ -323,14 +322,18 @@ if __name__=="__main__" and debug_mode<4:
             Y_test = autoML.predict(D.data['X_test'])
 
             print("({} s)".format( "%5.2f"%(time.time() - start)))
+
             vprint( verbose,  "[+] Prediction success, time spent so far %5.2f sec" % (time.time() - start))
-            # Write results
-            filename_valid = basename + '_valid_' + str(cycle).zfill(3) + '.predict'
-            data_io.write(os.path.join(output_dir,filename_valid), Y_valid)
-            filename_test = basename + '_test_' + str(cycle).zfill(3) + '.predict'
-            data_io.write(os.path.join(output_dir,filename_test), Y_test)
-            vprint( verbose,  "[+] Results saved, time spent so far %5.2f sec" % (time.time() - start))
-            time_spent = time.time() - start 
+
+            if cycle:
+                # Write results
+                filename_valid = basename + '_valid_' + str(cycle).zfill(3) + '.predict'
+                data_io.write(os.path.join(output_dir,filename_valid), Y_valid)
+                filename_test = basename + '_test_' + str(cycle).zfill(3) + '.predict'
+                data_io.write(os.path.join(output_dir,filename_test), Y_test)
+                vprint( verbose,  "[+] Results saved, time spent so far %5.2f sec" % (time.time() - start))
+
+            time_spent = time.time() - start
             vprint( verbose,  "[+] End cycle, remaining time %5.2f sec" % (time_budget-time_spent))
             cycle += 1
             time_spent_last = time.time() - begin
@@ -354,6 +357,5 @@ if __name__=="__main__" and debug_mode<4:
             exit(0)
         else:
             exit(1)
-
 
 

@@ -1,10 +1,14 @@
+from collections import defaultdict
 from sklearn import ensemble, cross_validation
 import numpy as np
 import scipy as sp
 from sklearn.cross_validation import cross_val_score
+from sklearn.decomposition import PCA
 from sklearn.grid_search import GridSearchCV
+from sklearn.lda import LDA
 from sklearn.linear_model import Ridge, RidgeClassifier, LogisticRegression
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, roc_curve, auc, \
+    accuracy_score, roc_auc_score
 from sklearn.naive_bayes import BernoulliNB
 from sklearn.ensemble import GradientBoostingClassifier, GradientBoostingRegressor, BaggingClassifier, BaggingRegressor, RandomForestClassifier, \
     ExtraTreesClassifier
@@ -14,12 +18,13 @@ from sklearn.ensemble import BaggingClassifier, BaggingRegressor
 from sklearn.naive_bayes import BernoulliNB
 from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import SelectKBest, SelectPercentile, f_classif, \
-    f_regression, VarianceThreshold
+    f_regression, VarianceThreshold, SelectFpr
 from sklearn.feature_selection import chi2
 import operator
 import copy
 from sklearn.preprocessing import Imputer, Normalizer
 from sklearn.svm import LinearSVC
+from lib.scores import bac_metric
 
 
 class OurAutoML:
@@ -33,6 +38,8 @@ class OurAutoML:
         self.sparse = info['is_sparse']
         self.task = info['task']
         self.selector = None
+        self.y_density = None
+        self.best_clf = None
 
     def fit(self, X_train, Y_train, n_estimators=100):
         if self.task == 'binary.classification' or self.task == 'multiclass.classification':
@@ -40,45 +47,123 @@ class OurAutoML:
 
         elif self.task == 'multilabel.classification':
             if self.sparse:
-                self.Ms = [BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10, n_jobs=8).fit(X_train, Y_train[:, i]) for i in range(self.target_num)]
+                self.Ms = [BaggingClassifier(base_estimator=BernoulliNB(), n_estimators=n_estimators/10, n_jobs=-1).fit(X_train, Y_train[:, i]) for i in range(self.target_num)]
             else:
-                self.Ms = [RForestClass(n_estimators, random_state=1, n_jobs=8).fit(X_train, Y_train[:, i]) for i in range(self.target_num)]
+                self.Ms = [RForestClass(n_estimators, random_state=1, n_jobs=-1).fit(X_train, Y_train[:, i]) for i in range(self.target_num)]
         elif self.task == 'regression':
             if self.sparse:
-                self.M = BaggingRegressor(base_estimator=BernoulliNB(), n_estimators=n_estimators/10, n_jobs=8).fit(X_train, Y_train)
+                self.M = BaggingRegressor(base_estimator=BernoulliNB(), n_estimators=n_estimators/10, n_jobs=-1).fit(X_train, Y_train)
             else:
-                self.M = RForestRegress(n_estimators, random_state=n_estimators, n_jobs=8).fit(X_train, Y_train)
+                self.M = RForestRegress(n_estimators, random_state=n_estimators, n_jobs=-1).fit(X_train, Y_train)
         else:
             assert "task not recognised"
         return self
 
-    def _binary_classifier(self, X, Y, n_estimators=100, min_features=45):
+    def _es_density(self, Y):
+        self.y_density = defaultdict(lambda:0)
+        w = 1./len(Y)
+        for label in set(Y):
+            self.y_density[label] = w *sum(Y==label)
+
+    def _get_clf(self, n_estimators, selectors):
+        if self.sparse:
+                clf = BaggingClassifier(base_estimator=BernoulliNB(),
+                                        n_estimators=n_estimators/10, n_jobs=-1)
+        else:
+            clf = RandomForestClassifier(n_estimators=n_estimators, n_jobs=-1)
+        seq_to_pipeline = []
+        seq_to_pipeline.append(("-const",VarianceThreshold()))
+        for selector in selectors:
+            seq_to_pipeline.append(selector)
+        seq_to_pipeline.append(("RF",clf))
+        return Pipeline(seq_to_pipeline)
+
+    def preprocess_bin_cl(self, X, Y, list_clf=None, n_estimators=50, test_size=0.4):
+        X_train, X_test, y_train, y_test = cross_validation \
+            .train_test_split(X, Y, test_size=test_size)
+
+        if list_clf is None:
+            list_clf = [
+                self._get_clf(n_estimators, []),
+                self._get_clf(n_estimators, [("SelectFpr", SelectFpr())]),
+                # self._get_clf(n_estimators, [("PCA", PCA())]),
+                # self._get_clf(n_estimators, [("LDA", LDA())]),
+                self._get_clf(n_estimators, [('linearSVC', LinearSVC())])
+            ]
+
+        best_clf, best_auc = None, 0
+        parameters = {'RF__criterion': ('gini', 'entropy'),
+                      'RF__max_features' : ('auto', 'sqrt'),
+                      'RF__max_depth': (50, 100, None)
+                      }
+
+        for cl in list_clf:
+            # try:
+            param = dict(parameters)
+            for step in cl.steps:
+                if step[0] == "SelectFpr":
+                    param.update(SelectFpr__alpha=(0.01, 0.05, 0.1))
+
+            gs = GridSearchCV(cl, param).fit(X, Y)
+            cl = gs.best_estimator_
+            auc = cross_val_score(cl, X_test, y_test,
+                                  cv=3, n_jobs=-1,
+                                  scoring='roc_auc').mean()
+            print("n_params: {}  ({})".format(cl.transform(X[0:1])
+                                      .shape[1], X.shape[1]))
+            print(cl.steps, auc)
+            if auc > best_auc:
+                best_clf, best_auc = cl, auc
+            # except Exception:
+                continue
+
+        self.best_clf = best_clf
+        print("best_clf:")
+        print([step[0] for step in self.best_clf.steps], best_auc)
+
+    def _binary_classifier(self, X, Y, n_estimators=100, min_features=150):
         """
         Main fit function
         """
+        self._es_density(Y)
         if self.sparse:
                 clf = BaggingClassifier(base_estimator=BernoulliNB(),
-                                        n_estimators=n_estimators/10, n_jobs=8)
+                                        n_estimators=n_estimators/10, n_jobs=-1)
         else:
-            clf = RForestClass(n_estimators, n_jobs=8)
+            # clf = RForestClass(n_estimators, n_jobs=-1)
+            clf = RandomForestClassifier(n_estimators=n_estimators,
+                                         criterion='entropy',
+
+                                         n_jobs=-1)
+
+        if self.best_clf is not None:
+            self.M = self.best_clf.fit(X,Y)
+            return
 
         n_features = X.shape[1]
-        seq_to_pipeline = [('discard_const_features', VarianceThreshold())]
+        seq_to_pipeline = []
+        seq_to_pipeline.append(('discard_const_features', VarianceThreshold()))
         if n_features > min_features:
-            seq_to_pipeline.append(('feature_selection', LinearSVC()))
+            # seq_to_pipeline.append(("SelectFpr", SelectFpr()))
+            # seq_to_pipeline.append(("PCA", PCA()))
+            # seq_to_pipeline.append(("LDA", LDA()))
+            seq_to_pipeline.append(('linearSVC', LinearSVC()))
         seq_to_pipeline.append(('clf', clf))
         self.M = Pipeline(seq_to_pipeline)
         self.M.fit(X, Y)
-        print("n_params: {}  ({})".format(self.M.transform(X[0:1]).shape[1], X.shape[1]))
+        print("n_params: {}  ({})".format(self.M.transform(X[0:1])
+                                          .shape[1], X.shape[1]))
 
     def fit_and_count_av_score(self, X, Y, cv=3, n_estimators=100, test_size=0.4):
-        X_train, X_test, y_train, y_test = cross_validation.train_test_split(X, Y, test_size=test_size, random_state=0)
+        X_train, X_test, y_train, y_test = cross_validation\
+            .train_test_split(X, Y, test_size=test_size)
         self.fit(X_train, y_train, n_estimators)
-        scores = cross_val_score(self.M, X_test, y_test, cv=cv, n_jobs=8,
-                                 scoring='accuracy')
-        print("test_score: ", scores.mean())
-        self.clf_report = classification_report(y_test, self.M.predict(X_test))
-        print(self.clf_report)
+        auc_scores = cross_val_score(self.M, X_test, y_test, cv=cv, n_jobs=-1,
+                                 scoring='roc_auc')
+        y_pred = self.predict(X_test)
+        print("roc_auc_score", auc_scores.mean())
+        print("bac_score: ", bac_metric(y_test, y_pred))
+        print(classification_report(y_test, self.bin(y_pred, 0)))
 
     def predict(self, X):
         if self.task == 'binary.classification':
@@ -101,12 +186,26 @@ class OurAutoML:
                     Y_pred[i][pos] -= self.target_num * eps
         return Y_pred
 
-    def scores(self, Y_true, Y_pred):
+    def bin(self, Y, eps=1e-6):
+        if self.y_density is not None and len(self.y_density) == 2:
+            threshold = self.y_density[0] / (self.y_density[0] + self.y_density[1])
+        Y[Y < threshold] = eps
+        Y[Y >= threshold] = 1. - eps
+        return Y
+
+
+
+
+class Scores():
+    def __init__(self, y_true, y_pred):
         pass
 
-
-
-
+    @staticmethod
+    def bac(y_true, y_pred):
+        fpr, tpr, _ = roc_curve(y_true, y_pred)
+        sensitivity = tpr
+        specificity = 1-fpr
+        return (sensitivity + specificity) / 2
 
 
 
@@ -303,4 +402,3 @@ class RandomPredictor:
     def predict_proba(self, X):
         prediction = np.random.rand(X.shape[0],self.target_num)
         return prediction			
-
