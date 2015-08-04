@@ -18,7 +18,7 @@ from sklearn.ensemble import BaggingClassifier, BaggingRegressor
 from sklearn.naive_bayes import BernoulliNB
 from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import SelectKBest, SelectPercentile, f_classif, \
-    f_regression, VarianceThreshold, SelectFpr
+    f_regression, VarianceThreshold, SelectFpr, SelectFwe, SelectFdr
 from sklearn.feature_selection import chi2
 import operator
 import copy
@@ -85,15 +85,23 @@ class OurAutoML:
         if list_clf is None:
             list_clf = [
                 self._get_clf(n_estimators, []),
-                self._get_clf(n_estimators, [("SelectFpr", SelectFpr())]),
+                self._get_clf(n_estimators, [("SelectFpr",
+                                              SelectFpr())]),
+                self._get_clf(n_estimators, [("SelectFwe",
+                                              SelectFwe())]),
+                self._get_clf(n_estimators, [("SelectFdr",
+                                              SelectFdr())]),
+                self._get_clf(n_estimators, [("SelectPercentile",
+                                              SelectPercentile())])
                 # self._get_clf(n_estimators, [("PCA", PCA())]),
                 # self._get_clf(n_estimators, [("LDA", LDA())]),
-                self._get_clf(n_estimators, [('linearSVC', LinearSVC())])
+                # self._get_clf(n_estimators, [('linearSVC', LinearSVC())])
             ]
 
-        best_clf, best_auc = None, 0
+        best_auc_clf, best_auc, best_auc__bac = None, 0, 0
+        best_bac_clf, best_bac, best_bac__auc = None, 0, 0
         parameters = {'RF__criterion': ('gini', 'entropy'),
-                      'RF__max_features' : ('auto', 'sqrt'),
+                      'RF__max_features': ('auto', 'sqrt'),
                       'RF__max_depth': (50, 100, None)
                       }
 
@@ -101,25 +109,55 @@ class OurAutoML:
             # try:
             param = dict(parameters)
             for step in cl.steps:
-                if step[0] == "SelectFpr":
-                    param.update(SelectFpr__alpha=(0.01, 0.05, 0.1))
+                if step[0] in {"SelectFpr", "SelectFwe", "SelectFdr"}:
+                    param.update({"{}__alpha"
+                                 .format(step[0]): (0.01, 0.05, 0.1)})
+                if step[0] == "SelectPercentile":
+                    param.update(SelectPercentile__percentile=(10, 15, 20, 40, 80))
 
-            gs = GridSearchCV(cl, param).fit(X, Y)
+            gs = GridSearchCV(cl, param,
+                              scoring='roc_auc',
+                              n_jobs=-1).fit(X_train, y_train)
             cl = gs.best_estimator_
-            auc = cross_val_score(cl, X_test, y_test,
-                                  cv=3, n_jobs=-1,
-                                  scoring='roc_auc').mean()
+            y_pred = cl.predict_proba(X_test)[:, 1]
+            auc_cv = cross_val_score(cl, X_test, y_test, scoring="roc_auc", cv=3, n_jobs=-1)
+            auc = roc_auc_score(y_test, y_pred)
+            bac = bac_metric(y_test, y_pred)
             print("n_params: {}  ({})".format(cl.transform(X[0:1])
-                                      .shape[1], X.shape[1]))
-            print(cl.steps, auc)
+                                              .shape[1], X.shape[1]))
+            print("steps: {steps}\n"
+                  "auc: {auc} {auc_cv_mean} ({auc_cv})\nbac: {bac}\n"
+                  .format(steps=cl.steps,
+                          auc=auc,
+                          auc_cv_mean=auc_cv.mean(),
+                          auc_cv=auc_cv,
+                          bac=bac))
+            auc = auc_cv.mean()
             if auc > best_auc:
-                best_clf, best_auc = cl, auc
-            # except Exception:
-                continue
+                best_auc_clf, best_auc, best_auc__bac = cl, auc, bac
+            if bac > best_bac:
+                best_bac_clf, best_bac, best_bac__auc = cl, bac, auc
 
-        self.best_clf = best_clf
-        print("best_clf:")
-        print([step[0] for step in self.best_clf.steps], best_auc)
+        self.best_clf = best_auc_clf
+        print("best_auc_clf:")
+        print("steps:{} auc: {}  bac: {}"
+              .format([step[0] for step in best_auc_clf.steps],
+                      best_auc,
+                      best_auc__bac))
+
+        print("best_bac_clf:")
+        print("steps:{} auc: {}  bac: {}"
+              .format([step[0] for step in best_bac_clf.steps],
+                      best_bac__auc,
+                      best_bac))
+
+        d_bac = best_bac - best_auc__bac
+        d_auc = best_auc - best_bac__auc
+
+        if d_bac - d_auc > 0:
+            self.best_clf = best_bac_clf
+        else:
+            self.best_clf = best_auc_clf
 
     def _binary_classifier(self, X, Y, n_estimators=100, min_features=150):
         """
@@ -144,10 +182,10 @@ class OurAutoML:
         seq_to_pipeline = []
         seq_to_pipeline.append(('discard_const_features', VarianceThreshold()))
         if n_features > min_features:
-            # seq_to_pipeline.append(("SelectFpr", SelectFpr()))
+            seq_to_pipeline.append(("SelectFpr", SelectFpr()))
             # seq_to_pipeline.append(("PCA", PCA()))
             # seq_to_pipeline.append(("LDA", LDA()))
-            seq_to_pipeline.append(('linearSVC', LinearSVC()))
+            # seq_to_pipeline.append(('linearSVC', LinearSVC()))
         seq_to_pipeline.append(('clf', clf))
         self.M = Pipeline(seq_to_pipeline)
         self.M.fit(X, Y)

@@ -135,7 +135,7 @@ max_cycle = 1#100
 # You can create a code submission archive, ready to submit, with zipme = True.
 # This is meant to be used on your LOCAL server.
 import datetime
-zipme = True # use this flag to enable zipping of your code submission
+zipme = False # use this flag to enable zipping of your code submission
 the_date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M")
 submission_filename = '../automl_sample_submission_' + the_date
 
@@ -278,40 +278,29 @@ if __name__=="__main__" and debug_mode<4:
         
         # ========= Iterating over learning cycles and keeping track of time
         time_spent = time.time() - start
-        vprint( verbose,  "[+] Remaining time after building model %5.2f sec" % (time_budget-time_spent))
-        if time_spent >= time_budget:
-            vprint( verbose,  "[-] Sorry, time budget exceeded, skipping this task")
-            execution_success = False
-            continue
 
         time_budget = time_budget - time_spent # Remove time spent so far
         start = time.time()              # Reset the counter
         time_spent = 0                   # Initialize time spent learning
         time_spent_last = 0                   # Initialize time spent learning
         time_stock = 5
-        prev_n_estimators = 0
         cycle = 0
         print("{:~^{n}}".format(basename.capitalize(), n=50))
         autoML = OurAutoML(D.info)
         X_train, Y_train = D.data['X_train'], D.data['Y_train']
-        autoML.preprocess_bin_cl(X_train, Y_train)
+        n_estimators = 500
+        autoML.preprocess_bin_cl(X_train, Y_train, n_estimators=int(n_estimators/2))
+        cycle=1
         while cycle <= 1: # max_cycle:
             begin = time.time()
             vprint( verbose,  "=========== " + basename.capitalize() +" Training cycle " + str(cycle) +" ================")
-            n_estimators = 10
-            if cycle:
-                n_estimators = int((time_budget*1.2 / time_spent_last - 0.5) * prev_n_estimators - time_stock)
-                # n_estimators = int(((time_budget / time_spent_last) - 1) * 5) # * 5 == aim to use 5/10 of the time budget
-                if n_estimators <= 0 or prev_n_estimators > n_estimators:
-                    break
             print("{} estimators".format(n_estimators))
             prev_n_estimators = n_estimators
 
-            K = D.info['target_num']
-            task = D.info['task']
-
             if _MODE == "TEST_SCORE":
-                autoML.fit_and_count_av_score(X_train, Y_train, n_estimators=n_estimators, test_size=0.4)
+                autoML.fit_and_count_av_score(X_train, Y_train,
+                                              n_estimators=n_estimators,
+                                              test_size=0.4)
             else:
                 autoML.fit(X_train, Y_train, n_estimators=n_estimators)
 
